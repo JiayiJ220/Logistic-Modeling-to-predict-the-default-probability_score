@@ -1,0 +1,142 @@
+---
+title: "Default Probability Score Prediction"
+author: "Jiayi Jiang"
+date: '2023-04-09'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Predicting Probability of Default
+
+### Write-up of my approach/procedures: 
+
+#### Step 1: The first step is to pre-process the datasets since there are missing values and unbalanced train-test problems. All missing values are from "employment" variable and this is a categorical variable, so I choose to replace those missing values by the most frequent category "10+". In addition, I will convert/encode several binary category variables into 0 and 1 such as "initial_list_status" and "term" columns. Finally, factor all text data with more than 2 distinct values.
+
+
+#### Step 2: Feature selection using Lasso with cross-validation, according to optimal lambda lambda.1se, we will choose total 13 variables: "reason", "n_collect", "interest", "initial_list_status", "term", "employment", "status", "quality", "volations", "fees_rec", "v1", "del", "req" because they are the variables with largest absolute value of coefficients after the lasso shrinking penalty. All variables importance plot are also shown below indicating the 13 variables are the most important ones.
+
+#### Step 3: Train the data using Logistic model on the chosen subset of variables.
+
+#### Step 4: Predict the raw risk score for the test data
+
+#### Step 5: Probability calibration, after this step, I build a complete 600 risk score prediction (calibrated) for each customer in the test set. The result is shown below in the array "cali_pred1"
+
+#### Step 6: Calculate the MAE of my prediction: 0.1141 which is very low as desired!
+
+```{r}
+library(readr)
+library(Hmisc)
+loan_train_final <- read_csv("~/Downloads/loan_train_final.csv")
+test_loan <- read_csv("~/Downloads/loan_test_final.csv")
+
+######################### Step 1: Data Processing #########################
+
+####### Treat the missing values:
+sum(is.na(loan_train_final))
+sum(is.na(test_loan))
+
+# describe(loan_train_final)
+# describe(test_loan)
+
+# describe(loan_train_final$employment)
+# describe(test_loan$employment)
+
+loan_train_final$employment[is.na(loan_train_final$employment)]<- "10+"
+test_loan$employment[is.na(test_loan$employment)]<- "10+"
+
+
+
+####### Treat the categorical data:
+# summary(loan_train_final)
+# summary(test_loan)
+
+# describe(loan_train_final$reason)
+# describe(test_loan$reason)
+
+loan_train_final$initial_list_status[loan_train_final$initial_list_status == "a"] <- 0
+loan_train_final$initial_list_status[loan_train_final$initial_list_status == "b"] <- 1
+loan_train_final$initial_list_status <- as.numeric(loan_train_final$initial_list_status)
+
+test_loan$initial_list_status[test_loan$initial_list_status == "a"] <- 0
+test_loan$initial_list_status[test_loan$initial_list_status == "b"] <- 1
+test_loan$initial_list_status <- as.numeric(test_loan$initial_list_status)
+
+loan_train_final$term[loan_train_final$term == "3 yrs"] <- 0
+loan_train_final$term[loan_train_final$term == "5 yrs"] <- 1
+loan_train_final$term <- as.numeric(loan_train_final$term)
+
+test_loan$term[test_loan$term == "3 yrs"] <- 0
+test_loan$term[test_loan$term == "5 yrs"] <- 1
+test_loan$term <- as.numeric(test_loan$term)
+
+####### Factor the text data:
+loan_train_final$reason <- as.factor(loan_train_final$reason)
+loan_train_final$employment <- as.factor(loan_train_final$employment)
+loan_train_final$status <- as.factor(loan_train_final$status)
+loan_train_final$quality <- as.factor(loan_train_final$quality)
+
+test_loan$reason <- as.factor(test_loan$reason)
+test_loan$employment <- as.factor(test_loan$employment)
+test_loan$status <- as.factor(test_loan$status)
+test_loan$quality <- as.factor(test_loan$quality)
+
+```
+
+```{r}
+######################### Step 2: Feature Selection #########################
+
+###### Lasso with cross-validation:
+library(glmnet)
+x_train <- model.matrix(default~., data = loan_train_final)[,-1]
+x_test <- model.matrix(default~., data = test_loan)[,-1]
+y_train <- loan_train_final$default
+y_test <- test_loan$default
+
+set.seed(8776)
+cv.lasso <- cv.glmnet(x_train, y_train, family = 'binomial')
+plot(cv.lasso)
+
+beta <- coef(cv.lasso, s = "lambda.1se")
+label <- beta@Dimnames[[1]]
+dotchart(beta[abs(beta)>0.01], labels = label)
+beta
+
+
+```
+
+```{r}
+######################### Step 3: Train the logistic model #########################
+library(rfUtilities)
+
+formal1 = as.formula(default~n_collect+interest+initial_list_status+term+fees_rec+employment+status+v1+reason+quality+violations+del+req)
+
+model1 <- glm(formal1, data = loan_train_final, family = "binomial")
+
+
+
+######################### Step 4: Predict the risk score  #########################
+
+pred_model1 <- predict(model1,test_loan, type="response")
+pred2<-predict(cv.lasso,x_test,type='response')
+
+
+######################### Step 5: Probability Calibration  ####cl#####################
+cali_pred1<-probability.calibration(test_loan$default, pred2, regularization = FALSE)
+
+plot(density(pred2), col="red", xlim=c(0,1), ylab="Density", xlab="probabilities",
+      main="Calibrated probabilities" )
+lines(density(cali_pred1), col="blue")
+legend("topright", legend=c("original","calibrated"),
+                lty = c(1,1), col=c("red","blue"))
+
+cali_pred1
+
+
+######################### Step 6: Calculate MAE of the prediction  ##########################
+
+mean(abs(y_test-cali_pred1))
+```
+
