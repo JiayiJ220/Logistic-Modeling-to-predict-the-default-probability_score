@@ -1,5 +1,5 @@
 ---
-title: "Default Probability Score Prediction"
+title: "Loan Default Probability Prediction"
 author: "Jiayi Jiang"
 date: '2023-04-09'
 output: html_document
@@ -9,9 +9,9 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Predicting Probability of Default
+## Predicting Probability of Loan Default
 
-### Write-up of my approach/procedures: 
+### Summary of the procedures: 
 
 #### Step 1: The first step is to pre-process the datasets since there are missing values and unbalanced train-test problems. All missing values are from "employment" variable and this is a categorical variable, so I choose to replace those missing values by the most frequent category "10+". In addition, I will convert/encode several binary category variables into 0 and 1 such as "initial_list_status" and "term" columns. Finally, factor all text data with more than 2 distinct values.
 
@@ -24,7 +24,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 #### Step 5: Probability calibration, after this step, I build a complete 600 risk score prediction (calibrated) for each customer in the test set. The result is shown below in the array "cali_pred1"
 
-#### Step 6: Calculate the MAE of my prediction: 0.1141 which is very low as desired!
+#### Step 6: Calculate the MAE error of the prediction model: 0.1141 which is very low as desired!
 
 ```{r}
 library(readr)
@@ -97,13 +97,11 @@ y_test <- test_loan$default
 
 set.seed(8776)
 cv.lasso <- cv.glmnet(x_train, y_train, family = 'binomial')
-plot(cv.lasso)
+plot(cv.lasso, main = "Lasso Method in Feature Selection")
 
 beta <- coef(cv.lasso, s = "lambda.1se")
 label <- beta@Dimnames[[1]]
-dotchart(beta[abs(beta)>0.01], labels = label)
-beta
-
+dotchart(beta[abs(beta)>0.01], labels = label, main = "Variable/Feature Importancy Rank")
 
 ```
 
@@ -114,7 +112,7 @@ library(rfUtilities)
 formal1 = as.formula(default~n_collect+interest+initial_list_status+term+fees_rec+employment+status+v1+reason+quality+violations+del+req)
 
 model1 <- glm(formal1, data = loan_train_final, family = "binomial")
-
+summary(model1)
 
 
 ######################### Step 4: Predict the risk score  #########################
@@ -123,7 +121,7 @@ pred_model1 <- predict(model1,test_loan, type="response")
 pred2<-predict(cv.lasso,x_test,type='response')
 
 
-######################### Step 5: Probability Calibration  ####cl#####################
+######################### Step 5: Probability Calibration  #########################
 cali_pred1<-probability.calibration(test_loan$default, pred2, regularization = FALSE)
 
 plot(density(pred2), col="red", xlim=c(0,1), ylab="Density", xlab="probabilities",
@@ -132,10 +130,12 @@ lines(density(cali_pred1), col="blue")
 legend("topright", legend=c("original","calibrated"),
                 lty = c(1,1), col=c("red","blue"))
 
+
+######################### Final Output: Loan Default Probability for Each Customer in Test Dataset #########################
 cali_pred1
 
 
-######################### Step 6: Calculate MAE of the prediction  ##########################
+######################### Step 6: Evaluation: Calculate MAE error of the prediction  ##########################
 
 mean(abs(y_test-cali_pred1))
 ```
